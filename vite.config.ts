@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   define: {
-    // Ensuring process.env.API_KEY is always a string to prevent build-time crashes
+    // Ensure process.env.API_KEY is available in the bundled code
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || process.env.VITE_API_KEY || '')
   },
   server: {
