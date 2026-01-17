@@ -96,7 +96,6 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ user, onBack, refreshUs
                   onChange={handleImageUpload}
                 />
              </div>
-             <p className="text-[9px] text-gray-600 mt-4 font-black uppercase tracking-widest">Tap to update operative visualization</p>
              
              <div className="w-full mt-6 space-y-3">
                 <div className="bg-black/30 p-4 rounded-2xl border border-white/5">
@@ -118,7 +117,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ user, onBack, refreshUs
              <i className="fa-solid fa-microphone text-red-500 text-xs animate-pulse"></i>
           </div>
           <div className="bg-[#1A1D24] p-5 rounded-3xl border border-gray-800 shadow-xl">
-            <p className="text-[10px] text-gray-500 mb-4 leading-relaxed font-medium uppercase tracking-tighter">Enter a custom cipher. System will initialize SOS sequence upon matching audio detection.</p>
+            <p className="text-[10px] text-gray-500 mb-4 leading-relaxed font-black uppercase tracking-tighter">Emergency Cipher:</p>
             <div className="flex gap-2">
               <input 
                 value={keyword}
@@ -160,48 +159,34 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ user, onBack, refreshUs
                 </button>
               </div>
             ))}
-            
-            {contacts.length === 0 && (
-              <div className="bg-[#1A1D24] border-2 border-dashed border-gray-800 rounded-3xl p-8 flex flex-col items-center opacity-40">
-                <i className="fa-solid fa-user-plus text-3xl mb-3 text-gray-600"></i>
-                <p className="text-[10px] font-black uppercase text-gray-600">No Trust Ties Established</p>
-              </div>
-            )}
           </div>
 
           <div className="bg-[#1A1D24] p-6 rounded-[2.5rem] border border-gray-800 shadow-2xl">
              <p className="text-[10px] text-gray-500 uppercase font-black tracking-widest mb-4">Initialize New Tie</p>
              <div className="space-y-3">
                 <input 
-                  placeholder="Operative Name"
+                  placeholder="Operative Name (e.g. John)"
                   value={newContact.name}
                   onChange={(e) => setNewContact({...newContact, name: e.target.value})}
                   className="w-full bg-black/40 border border-gray-700 rounded-2xl p-4 text-white text-xs font-bold placeholder:text-gray-700 focus:outline-none"
                 />
                 <input 
-                  placeholder="Comms Number"
+                  placeholder="Comms Number (e.g. +1 555-0101)"
                   value={newContact.phone}
                   onChange={(e) => setNewContact({...newContact, phone: e.target.value})}
                   className="w-full bg-black/40 border border-gray-700 rounded-2xl p-4 text-white text-xs font-mono placeholder:text-gray-700 focus:outline-none"
                 />
                 <button 
                   onClick={addContact}
-                  className="w-full bg-gray-800 text-white font-black py-4 rounded-2xl text-[10px] uppercase tracking-[0.2em] shadow-lg active:scale-95 transition-all mt-2"
+                  className="w-full bg-[#D32F2F] text-white font-black py-4 rounded-2xl text-[10px] uppercase tracking-[0.2em] shadow-lg active:scale-95 transition-all mt-2"
                 >
                   Verify and Add
                 </button>
              </div>
+             <p className="mt-4 text-[8px] text-gray-600 font-black uppercase text-center leading-relaxed">
+               Note: Enter any phone number. In this prototype, <br/>alerts are sent via shared browser state.
+             </p>
           </div>
-        </section>
-
-        <section className="bg-blue-500/10 border border-blue-500/20 p-5 rounded-3xl">
-           <div className="flex gap-4">
-              <i className="fa-solid fa-circle-info text-blue-500 mt-0.5"></i>
-              <div>
-                 <h4 className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-1">Responder Tip</h4>
-                 <p className="text-[10px] text-gray-500 leading-relaxed font-medium">Your trusted contacts can access the <b>Responder Hub</b> to see your live coordinates and manually mark you as safe if you are unable to.</p>
-              </div>
-           </div>
         </section>
       </div>
     </div>

@@ -1,0 +1,36 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper to check if user is a trusted contact
+    function isTrustedContact(userId) {
+      return exists(/databases/$(database)/documents/contacts/$(request.auth.uid + '_' + userId));
+    }
+
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /contacts/{contactId} {
+      allow read, write: if request.auth != null && (resource.data.ownerUserId == request.auth.uid || resource.data.contactId == request.auth.uid);
+    }
+
+    match /emergencies/{emergencyId} {
+      allow create: if request.auth != null;
+      allow read, update: if request.auth != null && (
+        resource.data.userId == request.auth.uid || 
+        isTrustedContact(resource.data.userId)
+      );
+    }
+
+    match /locations/{locationId} {
+      // High-precision tracking data only visible to the victim or their trusted responders
+      allow create: if request.auth != null;
+      allow read: if request.auth != null && (
+        get(/databases/$(database)/documents/emergencies/$(resource.data.emergencyId)).data.userId == request.auth.uid ||
+        isTrustedContact(get(/databases/$(database)/documents/emergencies/$(resource.data.emergencyId)).data.userId)
+      );
+    }
+  }
+}
