@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   define: {
-    // Ensure process.env.API_KEY is available in the bundled code
+    // Shims process.env.API_KEY for the browser
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || process.env.VITE_API_KEY || '')
   },
   server: {
@@ -13,11 +13,6 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    emptyOutDir: true,
-    rollupOptions: {
-      input: {
-        main: './index.html'
-      }
-    }
+    emptyOutDir: true
   }
 });
