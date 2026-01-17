@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, EmergencyRecord, LocationUpdate } from '../types';
 import { firebaseService } from '../firebase';
@@ -31,7 +30,7 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
   // Gemini Safety Auditor
   const runAiAudit = async (loc: LocationUpdate) => {
     try {
-      // Use process.env.API_KEY directly as per guidelines
+      // Use the mandatory initialization pattern as per @google/genai guidelines
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
@@ -42,6 +41,7 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
         Status: SOS ACTIVE. 
         Format: [SECURE LOG] {Report content}`
       });
+      // Correctly access response.text as a property, not a method
       setAiReport(response.text || "Audit complete. Protocols verified.");
     } catch (e) {
       setAiReport("Audit link active. Monitoring coordinates...");
@@ -76,10 +76,17 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
           
           firebaseService.pushLocation(newLoc);
           setCurrentCoords({ lat: latitude, lng: longitude });
-          setLocations(prev => [...prev, newLoc]);
-          addLog(`TX UPLINK: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
           
-          if (locations.length % 5 === 0) runAiAudit(newLoc);
+          // Use functional update to ensure we check the length of the actual next state
+          setLocations(prev => {
+            const next = [...prev, newLoc];
+            if (next.length % 5 === 0) {
+              runAiAudit(newLoc);
+            }
+            return next;
+          });
+
+          addLog(`TX UPLINK: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
 
           if (mapRef.current) {
             const latlng = [latitude, longitude];
@@ -108,7 +115,7 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
       if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
       if (mapRef.current) mapRef.current.remove();
     };
-  }, []);
+  }, [emergency.emergencyId, user.name, user.userId]);
 
   return (
     <div className="flex flex-col h-full w-full bg-[#0F1115]">
