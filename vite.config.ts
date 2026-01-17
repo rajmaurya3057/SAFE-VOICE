@@ -4,8 +4,8 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   define: {
-    // This allows process.env.API_KEY to be accessible in the browser code
-    'process.env.API_KEY': JSON.stringify(process.env.VITE_API_KEY || process.env.API_KEY || '')
+    // Ensuring process.env.API_KEY is always a string to prevent build-time crashes
+    'process.env.API_KEY': JSON.stringify(process.env.API_KEY || process.env.VITE_API_KEY || '')
   },
   server: {
     port: 3000,
@@ -13,6 +13,11 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: './index.html'
+      }
+    }
   }
 });
