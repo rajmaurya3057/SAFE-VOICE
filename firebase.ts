@@ -9,7 +9,10 @@ const getDB = () => {
 
 const saveDB = (db: any) => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+  // Global event for current window
   window.dispatchEvent(new Event('storage_update'));
+  // Cross-tab synchronization for simulation
+  window.dispatchEvent(new CustomEvent('storage_sync', { detail: db }));
 };
 
 export const firebaseService = {
@@ -78,24 +81,23 @@ export const firebaseService = {
     
     const user = Object.values(db.users).find((u: any) => u.userId === userId) as UserProfile;
     const contacts = db.contacts.filter((c: Contact) => c.userId === userId);
-    const lastLoc = db.locations.filter((l: any) => l.emergencyId === emergencyId).pop() || { latitude: 0, longitude: 0 };
 
     if (user) {
-      firebaseService.broadcastAlerts(user.name, emergencyId, lastLoc, contacts);
+      firebaseService.broadcastAlerts(user.name, emergencyId, contacts);
     }
 
     return emergencyId;
   },
 
-  broadcastAlerts: async (userName: string, emergencyId: string, location: any, contacts: Contact[]) => {
+  broadcastAlerts: async (userName: string, emergencyId: string, contacts: Contact[]) => {
     try {
-      await fetch('/api/alert', {
+      await fetch('/api/send-sms-alert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userName, emergencyId, location, contacts })
+        body: JSON.stringify({ userName, emergencyId, contacts })
       });
     } catch (err) {
-      console.error("[Twilio Dispatch] Failed:", err);
+      console.error("[Twilio Dispatch] Network Failure:", err);
     }
   },
 
