@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { UserProfile } from '../types';
 import { firebaseService } from '../firebase';
@@ -21,15 +20,29 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onLogout, onTriggerSOS, o
   
   const recognitionRef = useRef<any>(null);
   const restartTimeoutRef = useRef<any>(null);
+  const isTriggeringRef = useRef(false);
+  const activeSessionRef = useRef(false);
+
+  const stopRecognition = useCallback(() => {
+    if (recognitionRef.current) {
+      try {
+        activeSessionRef.current = false;
+        recognitionRef.current.stop();
+      } catch (e) {
+        console.warn("Stop command failed, likely already idle.");
+      }
+    }
+  }, []);
 
   const startRecognition = useCallback(() => {
-    if (recognitionRef.current && isArmed) {
-      try {
-        recognitionRef.current.start();
-        setMicError(null);
-      } catch (e) {
-        // Recognition already started or error
-      }
+    if (!recognitionRef.current || !isArmed || isTriggeringRef.current || activeSessionRef.current) return;
+    
+    try {
+      recognitionRef.current.start();
+      activeSessionRef.current = true;
+      setMicError(null);
+    } catch (e) {
+      console.warn("Recognition start failed:", e);
     }
   }, [isArmed]);
 
@@ -39,48 +52,54 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onLogout, onTriggerSOS, o
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
-      recognition.interimResults = true; // Set to true for live feedback
+      recognition.interimResults = true;
       recognition.lang = 'en-US';
 
       recognition.onresult = (event: any) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
-
+        let currentTranscript = '';
         for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const transcript = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalTranscript += transcript;
-          } else {
-            interimTranscript += transcript;
-          }
+          currentTranscript += event.results[i][0].transcript;
         }
 
-        const fullText = (finalTranscript || interimTranscript).toUpperCase();
-        setLastHeard(fullText);
+        const fullText = currentTranscript.trim().toUpperCase();
+        if (fullText) setLastHeard(fullText);
 
-        // Check for keyword
-        if (fullText.includes(user.emergencyKeyword.toUpperCase())) {
-          console.log("%c[SOS DETECTED]", "background: red; color: white", fullText);
+        const target = user.emergencyKeyword.trim().toUpperCase();
+        if (fullText.includes(target) && !isTriggeringRef.current) {
+          isTriggeringRef.current = true;
+          console.log("%c[SOS KEYWORD MATCHED]", "background: #D32F2F; color: white; padding: 5px; font-weight: bold;");
+          stopRecognition();
           onTriggerSOS();
         }
       };
 
-      recognition.onstart = () => setIsListening(true);
+      recognition.onstart = () => {
+        setIsListening(true);
+        activeSessionRef.current = true;
+      };
       
       recognition.onerror = (event: any) => {
-        console.error("Speech Recognition Error:", event.error);
-        if (event.error === 'not-allowed') {
+        // Handle common errors
+        if (event.error === 'no-speech') {
+          // This is a normal timeout, we don't show it to the user as an error
+          console.log("No speech detected, session will auto-restart...");
+        } else if (event.error === 'not-allowed') {
           setMicError("Mic Permission Denied");
+          setIsArmed(false);
         } else if (event.error === 'network') {
-          setMicError("Network required for Speech");
+          setMicError("Network Link Failure");
+        } else if (event.error !== 'aborted') {
+          console.warn("Speech Recognition Error:", event.error);
         }
       };
 
       recognition.onend = () => {
         setIsListening(false);
-        // Robust restart logic if still armed
-        if (isArmed) {
-          restartTimeoutRef.current = setTimeout(startRecognition, 300);
+        activeSessionRef.current = false;
+        // Aggressively restart if armed and no SOS triggered
+        if (isArmed && !isTriggeringRef.current) {
+          if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+          restartTimeoutRef.current = setTimeout(startRecognition, 200);
         }
       };
 
@@ -90,17 +109,15 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onLogout, onTriggerSOS, o
         startRecognition();
       }
     } else {
-      setMicError("Browser not supported");
+      setMicError("Browser Unsupported");
     }
 
     return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.onend = null; // Prevent restart on cleanup
-        recognitionRef.current.stop();
-      }
+      isTriggeringRef.current = false;
+      stopRecognition();
       if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
     };
-  }, [isArmed, user.emergencyKeyword, onTriggerSOS, startRecognition]);
+  }, [isArmed, user.emergencyKeyword, onTriggerSOS, startRecognition, stopRecognition]);
 
   const toggleArm = () => {
     const newState = !isArmed;
@@ -109,9 +126,10 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onLogout, onTriggerSOS, o
     refreshUser();
     
     if (newState) {
+      isTriggeringRef.current = false;
       startRecognition();
     } else {
-      if (recognitionRef.current) recognitionRef.current.stop();
+      stopRecognition();
     }
   };
 
@@ -130,11 +148,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onLogout, onTriggerSOS, o
                 <span className="text-[#D32F2F] font-black text-sm">{userInitials}</span>
               )}
             </div>
-            <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-green-500 border-2 border-[#1A1D24] rounded-full shadow-[0_0_8px_#22c55e]"></div>
+            <div className={`absolute -top-1 -right-1 w-3.5 h-3.5 border-2 border-[#1A1D24] rounded-full shadow-lg ${isArmed ? 'bg-red-500 animate-pulse shadow-red-500/50' : 'bg-green-500 shadow-green-500/50'}`}></div>
           </div>
           <div>
             <h3 className="text-sm font-black text-white leading-none tracking-tight">{user.name.split(' ')[0].toUpperCase()}</h3>
-            <span className="text-[8px] text-gray-600 uppercase font-black tracking-[0.2em] mt-1.5 block">Identity Authenticated</span>
+            <span className="text-[8px] text-gray-600 uppercase font-black tracking-[0.2em] mt-1.5 block">
+              {isArmed ? 'Voice Monitoring Active' : 'Sensors Standby'}
+            </span>
           </div>
         </div>
         <div className="flex gap-2.5">
@@ -149,21 +169,25 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onLogout, onTriggerSOS, o
 
       {/* Control Surface */}
       <div className="flex-1 flex flex-col items-center justify-center px-10">
-        <div className={`relative w-80 h-80 rounded-[4rem] border-2 transition-all duration-700 flex items-center justify-center ${isArmed ? 'border-red-500 shadow-[0_0_60px_rgba(211,47,47,0.2)]' : 'border-gray-800 shadow-none'}`}>
+        <div className={`relative w-80 h-80 rounded-[4rem] border-2 transition-all duration-700 flex items-center justify-center ${isArmed ? 'border-red-500 shadow-[0_0_80px_rgba(211,47,47,0.3)]' : 'border-gray-800 shadow-none'}`}>
           {isArmed && (
              <div className="absolute inset-0 rounded-[4rem] border-8 border-red-500/10 animate-ping"></div>
           )}
           <button 
             onClick={toggleArm}
-            className={`w-64 h-64 rounded-[3rem] shadow-2xl flex flex-col items-center justify-center transition-all active:scale-95 relative overflow-hidden group ${isArmed ? 'bg-[#D32F2F]' : 'bg-[#1A1D24]'}`}
+            className={`w-64 h-64 rounded-[3.5rem] shadow-2xl flex flex-col items-center justify-center transition-all active:scale-95 relative overflow-hidden group ${isArmed ? 'bg-[#D32F2F]' : 'bg-[#1A1D24]'}`}
           >
             <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
             <div className="relative mb-4">
-               <i className={`fa-solid ${isArmed ? 'fa-shield-halved' : 'fa-shield'} text-7xl text-white transition-all duration-500 ${isArmed ? 'scale-110' : 'scale-100'}`}></i>
-               {isListening && <i className="fa-solid fa-waveform-lines absolute -top-4 -right-4 text-white/40 text-2xl animate-pulse"></i>}
+               <i className={`fa-solid ${isArmed ? 'fa-shield-halved' : 'fa-shield'} text-7xl text-white transition-all duration-500 ${isArmed ? 'scale-110 drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]' : 'scale-100'}`}></i>
+               {isListening && <div className="absolute -top-4 -right-6 flex gap-0.5">
+                  <div className="w-1 h-3 bg-white rounded-full animate-[bounce_1s_infinite]"></div>
+                  <div className="w-1 h-5 bg-white rounded-full animate-[bounce_1.2s_infinite]"></div>
+                  <div className="w-1 h-2 bg-white rounded-full animate-[bounce_0.8s_infinite]"></div>
+               </div>}
             </div>
             <span className="text-2xl font-black tracking-[0.3em] text-white uppercase">{isArmed ? 'ARMED' : 'STANDBY'}</span>
-            <p className="text-[10px] text-white/50 font-black uppercase mt-2 tracking-widest">{isArmed ? 'Mic Monitoring' : 'Tap to Shield'}</p>
+            <p className="text-[10px] text-white/50 font-black uppercase mt-2 tracking-widest">{isArmed ? 'Listening for Help' : 'Tap to Arm'}</p>
           </button>
         </div>
 
@@ -171,43 +195,48 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onLogout, onTriggerSOS, o
         <div className="mt-12 w-full max-w-sm">
           <div className="bg-[#1A1D24] rounded-[2.5rem] p-6 border border-gray-800 shadow-2xl relative">
             <div className="flex justify-between items-center mb-5">
-               <p className="text-[9px] text-gray-500 uppercase font-black tracking-widest">Live Audio Feed</p>
+               <p className="text-[9px] text-gray-500 uppercase font-black tracking-widest">Acoustic Signal</p>
                <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-[8px] font-black uppercase transition-all ${isListening ? 'bg-red-500/20 text-red-500' : 'bg-gray-800 text-gray-600'}`}>
                  <span className={`w-1.5 h-1.5 rounded-full ${isListening ? 'bg-red-500 animate-pulse' : 'bg-gray-700'}`}></span>
-                 {isListening ? 'Listening' : 'Ready'}
+                 {isListening ? 'LISTENING' : 'OFF'}
                </div>
             </div>
 
             {micError ? (
               <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 text-center">
-                <p className="text-[10px] text-red-500 font-black uppercase tracking-widest">{micError}</p>
+                <p className="text-[10px] text-red-500 font-black uppercase tracking-widest leading-relaxed">
+                  <i className="fa-solid fa-triangle-exclamation mr-2"></i>
+                  {micError}
+                </p>
               </div>
             ) : (
-              <div className="bg-black/40 rounded-2xl p-4 border border-white/5 min-h-[60px] flex items-center justify-center overflow-hidden">
+              <div className="bg-black/40 rounded-2xl p-5 border border-white/5 min-h-[70px] flex items-center justify-center overflow-hidden">
                 {lastHeard ? (
-                  <p className="text-xs font-mono text-blue-400 text-center uppercase tracking-wider animate-in fade-in slide-in-from-bottom-2 duration-300 italic">
+                  <p className="text-sm font-mono text-blue-400 text-center uppercase tracking-wide animate-in fade-in duration-300 italic">
                     "{lastHeard}"
                   </p>
                 ) : (
-                  <p className="text-[9px] text-gray-600 uppercase font-black tracking-[0.3em] text-center">
-                    {isArmed ? 'Awaiting Cipher...' : 'Monitoring Paused'}
-                  </p>
+                  <div className="flex flex-col items-center gap-2">
+                    <p className="text-[9px] text-gray-700 uppercase font-black tracking-[0.3em] text-center">
+                      {isArmed ? 'Ready for command...' : 'Microphone Inactive'}
+                    </p>
+                  </div>
                 )}
               </div>
             )}
 
             <div className="mt-6 flex items-center justify-between bg-black/40 rounded-2xl p-4 border border-white/5">
               <div className="flex flex-col">
-                <span className="text-[8px] text-gray-500 uppercase font-black mb-1">Emergency Keyword</span>
-                <span className={`text-xl font-mono text-white tracking-[0.3em] transition-all duration-300 ${!showKeyword ? 'blur-md select-none opacity-20' : 'opacity-100'}`}>
+                <span className="text-[8px] text-gray-500 uppercase font-black mb-1">Active Keyword</span>
+                <span className={`text-xl font-mono text-white tracking-[0.4em] transition-all duration-500 ${!showKeyword ? 'blur-lg select-none opacity-20' : 'opacity-100'}`}>
                   {user.emergencyKeyword}
                 </span>
               </div>
               <button 
                 onClick={() => setShowKeyword(!showKeyword)} 
-                className="w-10 h-10 rounded-xl bg-gray-800/50 flex items-center justify-center text-[#D32F2F] hover:bg-red-500 hover:text-white transition-all"
+                className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all ${showKeyword ? 'bg-red-500 text-white' : 'bg-gray-800/50 text-[#D32F2F]'}`}
               >
-                <i className={`fa-solid ${showKeyword ? 'fa-eye-low-vision' : 'fa-eye'}`}></i>
+                <i className={`fa-solid ${showKeyword ? 'fa-eye' : 'fa-eye-slash'}`}></i>
               </button>
             </div>
           </div>
@@ -217,30 +246,35 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ user, onLogout, onTriggerSOS, o
       {/* Footer */}
       <div className="px-8 py-10 bg-[#1A1D24] rounded-t-[3.5rem] border-t border-gray-800 shadow-[0_-25px_60px_rgba(0,0,0,0.7)]">
         <button 
-          onClick={onTriggerSOS}
+          onClick={() => {
+            isTriggeringRef.current = true;
+            onTriggerSOS();
+          }}
           className="w-full bg-gradient-to-r from-[#D32F2F] to-red-600 text-white py-6 rounded-[2.5rem] flex items-center justify-center gap-5 font-black text-2xl tracking-[0.2em] transition-all active:scale-95 shadow-2xl shadow-red-900/40 group"
         >
-          <i className="fa-solid fa-radiation animate-pulse text-3xl group-hover:rotate-180 transition-transform duration-700"></i>
+          <i className="fa-solid fa-bolt-lightning animate-pulse text-3xl group-hover:scale-125 transition-transform"></i>
           PANIC SOS
         </button>
         
         <div className="mt-10 grid grid-cols-2 gap-6">
           <button onClick={onTrustedView} className="flex flex-col items-center gap-3 group">
-            <div className="w-14 h-14 rounded-2xl bg-gray-800/50 flex items-center justify-center group-hover:bg-[#D32F2F] group-hover:shadow-[0_0_20px_rgba(211,47,47,0.3)] transition-all border border-white/5">
-              <i className="fa-solid fa-users-rays text-white text-xl"></i>
+            <div className="w-14 h-14 rounded-2xl bg-gray-800/50 flex items-center justify-center group-hover:bg-blue-600 group-hover:shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all border border-white/5">
+              <i className="fa-solid fa-tower-broadcast text-white text-xl"></i>
             </div>
-            <span className="text-[9px] text-gray-600 font-black uppercase tracking-widest group-hover:text-white transition-colors">Trusted View</span>
+            <span className="text-[9px] text-gray-600 font-black uppercase tracking-widest group-hover:text-white transition-colors">Sentinel Hub</span>
           </button>
 
           <div className="flex flex-col items-center gap-3">
             <div className="w-14 h-14 rounded-2xl bg-gray-800/50 flex items-center justify-center border border-white/5">
-              <div className="flex gap-2">
-                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+              <div className="flex flex-col gap-1.5 items-center">
+                <div className="flex gap-1">
+                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                </div>
+                <div className="w-4 h-0.5 bg-emerald-500/30 rounded-full"></div>
               </div>
             </div>
-            <span className="text-[9px] text-gray-600 font-black uppercase tracking-widest">Sensors OK</span>
+            <span className="text-[9px] text-gray-600 font-black uppercase tracking-widest">Core Status</span>
           </div>
         </div>
       </div>

@@ -66,7 +66,6 @@ export const firebaseService = {
     saveDB(db);
   },
 
-  // Added missing deleteContact method to fix error in SettingsScreen.tsx
   deleteContact: (contactId: string) => {
     const db = getDB();
     db.contacts = db.contacts.filter((c: Contact) => c.contactId !== contactId);
@@ -84,9 +83,41 @@ export const firebaseService = {
     db.emergencies.push(record);
     saveDB(db);
     
-    // Simulate FCM/SMS Notification
+    // Initiate Real-World Alerts
+    const user = Object.values(db.users).find((u: any) => u.userId === userId) as UserProfile;
+    const contacts = db.contacts.filter((c: Contact) => c.userId === userId);
+    
+    // Get last known location for the initial alert
+    const lastLoc = db.locations.filter((l: any) => l.emergencyId === emergencyId).pop() || { latitude: 0, longitude: 0 };
+
+    // Fix: replaced 'this.broadcastAlerts' with 'firebaseService.broadcastAlerts' as 'this' is undefined in arrow functions.
+    // Also added a check to ensure 'user' exists before accessing properties.
+    if (user) {
+      firebaseService.broadcastAlerts(user.name, emergencyId, lastLoc, contacts);
+    }
+
     console.log(`%c[FCM BROADCAST] High Priority SOS Sent for ${userId}`, 'background: #D32F2F; color: white; padding: 5px;');
     return emergencyId;
+  },
+
+  // NEW: Dispatcher for backend alerts
+  broadcastAlerts: async (userName: string, emergencyId: string, location: any, contacts: Contact[]) => {
+    try {
+      const response = await fetch('/api/send-alert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userName,
+          emergencyId,
+          location,
+          contacts: contacts.map(c => ({ name: c.name, phone: c.phone }))
+        })
+      });
+      const data = await response.json();
+      console.log("[Backend Alert System]:", data.message);
+    } catch (err) {
+      console.error("[Backend Alert System] Critical Failure:", err);
+    }
   },
 
   resolveEmergency: (emergencyId: string) => {
@@ -103,18 +134,15 @@ export const firebaseService = {
     return getDB().emergencies.filter((e: EmergencyRecord) => e.status === EmergencyStatus.ACTIVE);
   },
 
-  // Added missing getActiveEmergency method to fix error in App.tsx
   getActiveEmergency: (userId: string): EmergencyRecord | undefined => {
     return getDB().emergencies.find((e: EmergencyRecord) => e.userId === userId && e.status === EmergencyStatus.ACTIVE);
   },
 
-  // GET VICTIM DETAILS
   getUserById: (userId: string): UserProfile | undefined => {
     const db = getDB();
     return Object.values(db.users).find((u: any) => u.userId === userId) as UserProfile;
   },
 
-  // LOCATION CORE
   pushLocation: (location: LocationUpdate) => {
     const db = getDB();
     db.locations.push(location);
