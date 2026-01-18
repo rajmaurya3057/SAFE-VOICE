@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, Contact } from '../types';
 import { firebaseService } from '../firebase';
@@ -13,6 +12,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ user, onBack, refreshUs
   const [keyword, setKeyword] = useState(user.emergencyKeyword);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [newContact, setNewContact] = useState({ name: '', phone: '' });
+  const [testLoading, setTestLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -23,6 +23,28 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ user, onBack, refreshUs
     firebaseService.updateProfile(user.userId, { emergencyKeyword: keyword.toUpperCase() });
     refreshUser();
     alert("Voice Protocol Cipher Updated.");
+  };
+
+  const testUplink = async () => {
+    if (contacts.length === 0) {
+      alert("Please add at least one contact to test the uplink.");
+      return;
+    }
+    setTestLoading(true);
+    try {
+      const result = await firebaseService.broadcastAlerts(user.name, "TEST_SIGNAL", contacts);
+      if (result.simulated) {
+        alert("TEST COMPLETE: Twilio credentials missing in Vercel. Signal logged to console only.");
+      } else if (result.success) {
+        alert("TEST SUCCESS: Dispatch signal sent to Twilio. Check your phone/logs.");
+      } else {
+        alert("TEST FAILED: " + (result.error || "Unknown Error"));
+      }
+    } catch (e) {
+      alert("NETWORK ERROR: Could not reach Vercel backend.");
+    } finally {
+      setTestLoading(false);
+    }
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -110,6 +132,25 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ user, onBack, refreshUs
           </div>
         </section>
 
+        {/* System Diagnostics */}
+        <section>
+          <div className="flex justify-between items-center mb-4">
+             <h3 className="text-[10px] text-gray-500 uppercase font-black tracking-widest">System Diagnostics</h3>
+             <i className="fa-solid fa-satellite text-blue-500 text-xs"></i>
+          </div>
+          <div className="bg-[#1A1D24] p-5 rounded-3xl border border-gray-800 shadow-xl">
+            <button 
+              onClick={testUplink}
+              disabled={testLoading}
+              className="w-full bg-blue-600/20 border border-blue-500/30 text-blue-500 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 active:scale-95 transition-all disabled:opacity-50"
+            >
+              <i className={`fa-solid ${testLoading ? 'fa-spinner animate-spin' : 'fa-vial'}`}></i>
+              {testLoading ? 'Testing Link...' : 'Verify Twilio Uplink'}
+            </button>
+            <p className="text-[7px] text-gray-600 font-black uppercase text-center mt-3 tracking-widest">Verifies Twilio API Keys in Vercel</p>
+          </div>
+        </section>
+
         {/* Keyword Setting */}
         <section>
           <div className="flex justify-between items-center mb-4">
@@ -184,7 +225,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ user, onBack, refreshUs
                 </button>
              </div>
              <p className="mt-4 text-[8px] text-gray-600 font-black uppercase text-center leading-relaxed">
-               Note: Enter any phone number. In this prototype, <br/>alerts are sent via shared browser state.
+               Note: Enter a valid E.164 phone number (e.g. +1... )<br/>to receive real Twilio SMS alerts.
              </p>
           </div>
         </section>

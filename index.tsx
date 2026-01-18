@@ -2,20 +2,19 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 
-// Initialize Google Maps with the key from environment variables
+// Initialize Google Maps with the dedicated key from environment variables
 const initializeMaps = () => {
-  const apiKey = process.env.API_KEY;
+  // Use the dedicated Maps key if available, otherwise fallback to the primary API key
+  const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.API_KEY;
   
-  // Call the loader hook defined in index.html
   if (typeof (window as any).initGoogleMaps === 'function') {
-    (window as any).initGoogleMaps(apiKey || '');
+    (window as any).initGoogleMaps(mapsKey || '');
   } else {
-    // Fail-safe retry if DOM is still mounting
     setTimeout(() => {
       if (typeof (window as any).initGoogleMaps === 'function') {
-        (window as any).initGoogleMaps(apiKey || '');
+        (window as any).initGoogleMaps(mapsKey || '');
       }
-    }, 50);
+    }, 100);
   }
 };
 

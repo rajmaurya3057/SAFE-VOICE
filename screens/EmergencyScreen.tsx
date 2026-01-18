@@ -3,7 +3,6 @@ import { UserProfile, EmergencyRecord, LocationUpdate } from '../types';
 import { firebaseService } from '../firebase';
 import { GoogleGenAI } from "@google/genai";
 
-// Declare google as any to fix "Cannot find name 'google'" and "Cannot find namespace 'google'" errors.
 declare const google: any;
 
 interface EmergencyScreenProps {
@@ -14,8 +13,9 @@ interface EmergencyScreenProps {
 
 const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onResolve }) => {
   const [lastUpdate, setLastUpdate] = useState<number>(Date.now());
-  const [aiInsight, setAiInsight] = useState<string>("Initializing tactical oversight...");
+  const [aiInsight, setAiInsight] = useState<string>("Analyzing local environment...");
   const [mapError, setMapError] = useState<boolean>(false);
+  const [dispatchStatus, setDispatchStatus] = useState<{sent: number, total: number} | null>(null);
   
   const mapRef = useRef<any>(null);
   const markerRef = useRef<any>(null);
@@ -23,8 +23,18 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
   const watchIdRef = useRef<number | null>(null);
 
   useEffect(() => {
+    const handleDispatch = (e: any) => {
+      const data = e.detail;
+      if (data.sentCount !== undefined) {
+        setDispatchStatus({ sent: data.sentCount, total: data.totalCount || 0 });
+      }
+    };
+    window.addEventListener('twilio_dispatch_result', handleDispatch);
+    return () => window.removeEventListener('twilio_dispatch_result', handleDispatch);
+  }, []);
+
+  useEffect(() => {
     const initMap = async () => {
-      // Check if google maps script actually loaded (prevents crash on invalid key)
       if (typeof google === 'undefined' || !google.maps || !google.maps.importLibrary) {
         setMapError(true);
         return;
@@ -32,10 +42,7 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
 
       try {
         const { Map } = await google.maps.importLibrary("maps");
-        const mapDiv = document.getElementById("google-map");
-        if (!mapDiv) return;
-
-        mapRef.current = new Map(mapDiv, {
+        mapRef.current = new Map(document.getElementById("google-map"), {
           center: { lat: 0, lng: 0 },
           zoom: 18,
           disableDefaultUI: true,
@@ -53,61 +60,56 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
           map: mapRef.current
         });
       } catch (err) {
-        console.error("Map initialization failed:", err);
         setMapError(true);
       }
     };
 
     initMap();
 
-    // High Accuracy Polling
     if ("geolocation" in navigator) {
-      const startTracking = () => {
-        watchIdRef.current = navigator.geolocation.watchPosition(
-          (pos) => {
-            const { latitude, longitude } = pos.coords;
-            const update: LocationUpdate = {
-              emergencyId: emergency.emergencyId,
-              latitude,
-              longitude,
-              timestamp: Date.now()
-            };
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          const update: LocationUpdate = {
+            emergencyId: emergency.emergencyId,
+            latitude,
+            longitude,
+            timestamp: Date.now()
+          };
+          
+          firebaseService.pushLocation(update);
+          setLastUpdate(Date.now());
+          
+          if (mapRef.current) {
+            const latLng = { lat: latitude, lng: longitude };
+            mapRef.current.setCenter(latLng);
             
-            firebaseService.pushLocation(update);
-            setLastUpdate(Date.now());
-            
-            if (mapRef.current) {
-              const latLng = { lat: latitude, lng: longitude };
-              mapRef.current.setCenter(latLng);
-              
-              if (!markerRef.current) {
-                markerRef.current = new google.maps.Marker({
-                  position: latLng,
-                  map: mapRef.current,
-                  icon: {
-                    path: google.maps.SymbolPath.CIRCLE,
-                    scale: 10,
-                    fillColor: "#D32F2F",
-                    fillOpacity: 1,
-                    strokeColor: "#FFFFFF",
-                    strokeWeight: 2,
-                  }
-                });
-              } else {
-                markerRef.current.setPosition(latLng);
-              }
-
-              if (pathRef.current) {
-                const path = pathRef.current.getPath();
-                path.push(new google.maps.LatLng(latitude, longitude));
-              }
+            if (!markerRef.current) {
+              markerRef.current = new google.maps.Marker({
+                position: latLng,
+                map: mapRef.current,
+                icon: {
+                  path: google.maps.SymbolPath.CIRCLE,
+                  scale: 10,
+                  fillColor: "#D32F2F",
+                  fillOpacity: 1,
+                  strokeColor: "#FFFFFF",
+                  strokeWeight: 2,
+                }
+              });
+            } else {
+              markerRef.current.setPosition(latLng);
             }
-          },
-          (err) => console.error("GPS Error:", err),
-          { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-        );
-      };
-      startTracking();
+
+            if (pathRef.current) {
+              const path = pathRef.current.getPath();
+              path.push(new google.maps.LatLng(latitude, longitude));
+            }
+          }
+        },
+        (err) => console.error("GPS Error:", err),
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
     }
 
     return () => {
@@ -115,7 +117,6 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
     };
   }, [emergency.emergencyId]);
 
-  // AI Tactical Feed
   useEffect(() => {
     const fetchAiAdvice = async () => {
       if (!process.env.API_KEY) return;
@@ -123,77 +124,82 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const response = await ai.models.generateContent({
           model: 'gemini-3-flash-preview',
-          contents: "Provide a one-sentence tactical safety advice for someone in a generic emergency situation. Be brief and calm."
+          contents: "Provide a very short tactical safety tip (10 words max) for someone in immediate danger. For example: 'Stay in lit areas' or 'Find a safe exit'."
         });
-        setAiInsight(response.text || "Tactical link active. Stay aware.");
+        setAiInsight(response.text || "Scanning perimeter. Stay alert.");
       } catch (e) {
-        setAiInsight("Link active. Proceed with caution.");
+        setAiInsight("Protocol active. Move toward safety.");
       }
     };
     fetchAiAdvice();
-    const interval = setInterval(fetchAiAdvice, 30000);
+    const interval = setInterval(fetchAiAdvice, 20000);
     return () => clearInterval(interval);
   }, []);
 
   return (
     <div className="relative h-full w-full bg-black overflow-hidden">
-      {/* Immersive Map Container */}
-      <div id="google-map" className="absolute inset-0 z-0 opacity-80">
+      <div id="google-map" className="absolute inset-0 z-0 opacity-70">
         {mapError && (
           <div className="h-full w-full flex flex-col items-center justify-center bg-[#090b0e] p-8 text-center">
              <i className="fa-solid fa-map-location-dot text-gray-800 text-6xl mb-6"></i>
-             <p className="text-gray-500 font-black uppercase text-[10px] tracking-widest leading-relaxed">
-               Tactical Mapping Offline<br/>
-               <span className="text-gray-700">Check Sentinel Key Permissions</span>
-             </p>
+             <p className="text-gray-500 font-black uppercase text-[10px] tracking-widest leading-relaxed">Map Feed Interrupted</p>
           </div>
         )}
       </div>
 
-      {/* Glass Overlay UI */}
       <div className="absolute top-10 left-4 right-4 z-10 space-y-3 pointer-events-none">
-        <div className="bg-black/60 backdrop-blur-xl border border-white/10 rounded-2xl p-4 shadow-2xl pointer-events-auto">
+        <div className="bg-black/80 backdrop-blur-xl border border-white/10 rounded-2xl p-4 shadow-2xl pointer-events-auto">
           <div className="flex justify-between items-center mb-2">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-red-500 animate-ping"></div>
-              <h2 className="text-[10px] font-black tracking-widest text-red-500 uppercase">Live Intercept</h2>
+              <h2 className="text-[10px] font-black tracking-widest text-red-500 uppercase">Tactical Advice</h2>
             </div>
-            <span className="text-[8px] font-mono text-gray-400">SYNC: {new Date(lastUpdate).toLocaleTimeString()}</span>
+            <span className="text-[8px] font-mono text-gray-500 uppercase">Real-time Feed</span>
           </div>
           <p className="text-white text-xs font-bold leading-relaxed italic">"{aiInsight}"</p>
         </div>
-      </div>
 
-      {/* Floating Status Badge */}
-      <div className="absolute top-1/2 left-4 z-10 -translate-y-1/2 pointer-events-none">
-        <div className="bg-[#D32F2F] text-white py-4 px-2 rounded-full flex flex-col items-center gap-3 shadow-2xl border border-white/20">
-           <i className="fa-solid fa-satellite-dish animate-pulse text-xs"></i>
-           <div className="h-12 w-px bg-white/20"></div>
-           <span className="text-[8px] font-black uppercase tracking-widest [writing-mode:vertical-lr] rotate-180">Active SOS</span>
+        {/* SOS Dispatch Status HUD */}
+        <div className="bg-black/80 backdrop-blur-xl border border-white/10 rounded-2xl p-3 shadow-2xl pointer-events-auto flex items-center justify-between">
+           <div className="flex items-center gap-3">
+              <i className="fa-solid fa-tower-broadcast text-blue-500 text-xs"></i>
+              <span className="text-[9px] font-black uppercase text-gray-400">SMS Dispatch:</span>
+           </div>
+           {dispatchStatus ? (
+             <span className={`text-[10px] font-black font-mono ${dispatchStatus.sent > 0 ? 'text-green-500' : 'text-red-500'}`}>
+               {dispatchStatus.sent}/{dispatchStatus.total} SUCCESS
+             </span>
+           ) : (
+             <div className="flex items-center gap-2">
+                <span className="text-[9px] font-black font-mono text-yellow-500 uppercase animate-pulse">Broadcasting...</span>
+             </div>
+           )}
         </div>
       </div>
 
-      {/* Control Dock */}
       <div className="absolute bottom-10 left-6 right-6 z-20">
-        <div className="bg-black/60 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-6 shadow-[0_30px_60px_rgba(0,0,0,0.8)]">
-          <div className="flex items-center justify-between mb-6">
+        <div className="bg-black/80 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-6 shadow-[0_30px_60px_rgba(0,0,0,0.8)]">
+          <div className="flex items-center justify-between mb-6 px-2">
              <div>
-               <p className="text-[8px] text-gray-500 font-black uppercase mb-1">Target</p>
-               <h4 className="text-white font-black uppercase tracking-tight">{user.name}</h4>
+               <p className="text-[8px] text-gray-500 font-black uppercase mb-1">Operative</p>
+               <h4 className="text-white text-sm font-black uppercase tracking-tight">{user.name}</h4>
              </div>
              <div className="text-right">
-                <p className="text-[8px] text-gray-500 font-black uppercase mb-1">Status</p>
-                <div className="px-3 py-1 bg-red-500/10 border border-red-500/30 rounded-full">
-                   <span className="text-[9px] text-red-500 font-black uppercase">Distress</span>
+                <p className="text-[8px] text-gray-500 font-black uppercase mb-1">Signal Quality</p>
+                <div className="flex gap-0.5 items-end h-3">
+                   <div className="w-1 h-1 bg-emerald-500"></div>
+                   <div className="w-1 h-2 bg-emerald-500"></div>
+                   <div className="w-1 h-3 bg-emerald-500"></div>
+                   <div className="w-1 h-2.5 bg-gray-700"></div>
                 </div>
              </div>
           </div>
           
           <button 
             onClick={onResolve}
-            className="w-full bg-[#10B981] hover:bg-emerald-400 text-white py-5 rounded-3xl font-black text-sm tracking-[0.2em] shadow-2xl active:scale-95 transition-all uppercase"
+            className="w-full bg-[#10B981] hover:bg-emerald-400 text-white py-5 rounded-[1.5rem] font-black text-xs tracking-[0.2em] shadow-2xl active:scale-95 transition-all uppercase"
           >
-            Declare Safe Condition
+            I am safe / Terminate Session
           </button>
         </div>
       </div>

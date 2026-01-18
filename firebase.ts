@@ -9,9 +9,7 @@ const getDB = () => {
 
 const saveDB = (db: any) => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-  // Global event for current window
   window.dispatchEvent(new Event('storage_update'));
-  // Cross-tab synchronization for simulation
   window.dispatchEvent(new CustomEvent('storage_sync', { detail: db }));
 };
 
@@ -83,6 +81,7 @@ export const firebaseService = {
     const contacts = db.contacts.filter((c: Contact) => c.userId === userId);
 
     if (user) {
+      // Trigger background alert sequence
       firebaseService.broadcastAlerts(user.name, emergencyId, contacts);
     }
 
@@ -90,14 +89,23 @@ export const firebaseService = {
   },
 
   broadcastAlerts: async (userName: string, emergencyId: string, contacts: Contact[]) => {
+    console.log(`[Twilio Dispatch] Targeting ${contacts.length} responders...`);
     try {
-      await fetch('/api/send-sms-alert', {
+      const response = await fetch('/api/send-sms-alert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userName, emergencyId, contacts })
       });
+      const data = await response.json();
+      
+      // Dispatch custom event for UI feedback on dispatch status
+      window.dispatchEvent(new CustomEvent('twilio_dispatch_result', { detail: data }));
+      return data;
     } catch (err) {
-      console.error("[Twilio Dispatch] Network Failure:", err);
+      console.error("[Twilio Dispatch] Network failure:", err);
+      const errorData = { success: false, error: 'Network Connection Failed' };
+      window.dispatchEvent(new CustomEvent('twilio_dispatch_result', { detail: errorData }));
+      return errorData;
     }
   },
 

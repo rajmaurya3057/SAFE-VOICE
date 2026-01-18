@@ -1,6 +1,6 @@
 {
-  "name": "Copy of SAFE-VOICE",
-  "description": "A mission-critical women's safety application with voice-triggered SOS, real-time location sharing, and emergency contact integration.",
+  "name": "SAFE-VOICE",
+  "description": "Tactical Safety System with Voice SOS and Twilio SMS Integration.",
   "requestFramePermissions": [
     "microphone",
     "geolocation"
