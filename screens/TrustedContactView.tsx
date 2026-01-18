@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { EmergencyRecord, LocationUpdate, UserProfile } from '../types';
 import { firebaseService } from '../firebase';
 
-declare const L: any;
+// Declare google as any to fix "Cannot find name 'google'" and "Cannot find namespace 'google'" errors.
+declare const google: any;
 
 interface TrustedContactViewProps {
   onBack: () => void;
@@ -30,6 +31,8 @@ const TrustedContactView: React.FC<TrustedContactViewProps> = ({ onBack }) => {
       } else {
         setSelectedEmergency(null);
         setVictimProfile(null);
+        if (markerRef.current) markerRef.current.setMap(null);
+        if (pathRef.current) pathRef.current.setPath([]);
       }
     }
   };
@@ -37,38 +40,72 @@ const TrustedContactView: React.FC<TrustedContactViewProps> = ({ onBack }) => {
   const updateMap = (locs: LocationUpdate[]) => {
     if (!mapRef.current || locs.length === 0) return;
     const latest = locs[locs.length - 1];
-    const latlng = [latest.latitude, latest.longitude];
-    mapRef.current.setView(latlng, 17);
+    const latLng = { lat: latest.latitude, lng: latest.longitude };
+    
+    mapRef.current.setCenter(latLng);
+    
     if (markerRef.current) {
-      markerRef.current.setLatLng(latlng);
+      markerRef.current.setPosition(latLng);
     } else {
-      const icon = L.divIcon({
-        className: 'm-0',
-        html: `<div class="w-8 h-8 bg-red-600 rounded-full border-2 border-white flex items-center justify-center shadow-2xl animate-pulse"><i class="fa-solid fa-person-walking-exclamation text-white text-xs"></i></div>`,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16]
+      markerRef.current = new google.maps.Marker({
+        position: latLng,
+        map: mapRef.current,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 12,
+          fillColor: "#D32F2F",
+          fillOpacity: 1,
+          strokeColor: "#FFFFFF",
+          strokeWeight: 2,
+        },
+        title: victimProfile?.name || "Target"
       });
-      markerRef.current = L.marker(latlng, { icon }).addTo(mapRef.current);
     }
-    if (pathRef.current) pathRef.current.setLatLngs(locs.map(l => [l.latitude, l.longitude]));
+
+    if (pathRef.current) {
+      pathRef.current.setPath(locs.map(l => ({ lat: l.latitude, lng: l.longitude })));
+    }
   };
 
   useEffect(() => {
-    if (!mapRef.current) {
-      mapRef.current = L.map('command-map', { zoomControl: false, attributionControl: false }).setView([20, 0], 2);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(mapRef.current);
-      pathRef.current = L.polyline([], { color: '#D32F2F', weight: 4, opacity: 0.5 }).addTo(mapRef.current);
-    }
+    const initMap = async () => {
+      if (typeof google === 'undefined') return;
+      try {
+        const { Map } = await google.maps.importLibrary("maps");
+        mapRef.current = new Map(document.getElementById('command-map'), {
+          zoom: 15,
+          center: { lat: 20, lng: 0 },
+          disableDefaultUI: true,
+          styles: [
+            { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
+            { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
+            { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
+            { featureType: "water", elementType: "geometry", stylers: [{ color: "#17263c" }] }
+          ]
+        });
+
+        pathRef.current = new google.maps.Polyline({
+          strokeColor: '#D32F2F',
+          strokeOpacity: 0.6,
+          strokeWeight: 4,
+          map: mapRef.current
+        });
+      } catch (err) {
+        console.error("Map initialization failed:", err);
+      }
+    };
+
+    initMap();
     const interval = setInterval(refreshData, 3000);
     return () => {
       clearInterval(interval);
-      if (mapRef.current) mapRef.current.remove();
     };
   }, []);
 
   const selectEmergency = (e: EmergencyRecord) => {
     setSelectedEmergency(e);
-    setVictimProfile(firebaseService.getUserById(e.userId) || null);
+    const profile = firebaseService.getUserById(e.userId) || null;
+    setVictimProfile(profile);
     const locs = firebaseService.getEmergencyLocations(e.emergencyId);
     updateMap(locs);
   };
@@ -76,7 +113,7 @@ const TrustedContactView: React.FC<TrustedContactViewProps> = ({ onBack }) => {
   return (
     <div className="relative h-full w-full bg-[#090B0E] text-white overflow-hidden">
       {/* Immersive Map Background */}
-      <div id="command-map" className="absolute inset-0 z-0 grayscale-[0.3]"></div>
+      <div id="command-map" className="absolute inset-0 z-0"></div>
 
       {/* HUD Header */}
       <div className="absolute top-10 left-4 right-4 z-10 flex items-center justify-between">
@@ -127,7 +164,7 @@ const TrustedContactView: React.FC<TrustedContactViewProps> = ({ onBack }) => {
                  <div 
                    key={e.emergencyId} 
                    onClick={() => selectEmergency(e)}
-                   className={`px-4 py-3 rounded-2xl border transition-all flex justify-between items-center ${selectedEmergency?.emergencyId === e.emergencyId ? 'bg-red-500/20 border-red-500' : 'bg-white/5 border-white/10'}`}
+                   className={`px-4 py-3 rounded-2xl border transition-all cursor-pointer flex justify-between items-center ${selectedEmergency?.emergencyId === e.emergencyId ? 'bg-red-500/20 border-red-500' : 'bg-white/5 border-white/10'}`}
                  >
                    <span className="text-[9px] font-black text-white">TARGET: {e.emergencyId.slice(-6)}</span>
                    <div className="w-2 h-2 rounded-full bg-red-500 animate-ping"></div>

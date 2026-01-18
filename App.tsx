@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { UserProfile, AppState, EmergencyRecord, EmergencyStatus } from './types';
 import { firebaseService } from './firebase';
 import SplashScreen from './screens/SplashScreen';
@@ -8,14 +7,25 @@ import HomeScreen from './screens/HomeScreen';
 import EmergencyScreen from './screens/EmergencyScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import TrustedContactView from './screens/TrustedContactView';
+import TrackingScreen from './screens/TrackingScreen';
 
 const App: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<AppState>('SPLASH');
   const [user, setUser] = useState<UserProfile | null>(null);
   const [activeEmergency, setActiveEmergency] = useState<EmergencyRecord | null>(null);
+  const [trackId, setTrackId] = useState<string | null>(null);
   
-  // App initialization
+  // App initialization & Deep Linking
   useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+    
+    if (id && window.location.pathname.includes('/track')) {
+      setTrackId(id);
+      setCurrentScreen('TRACKING_LINK');
+      return;
+    }
+
     const timer = setTimeout(() => {
       const savedUser = firebaseService.getCurrentUser();
       if (savedUser) {
@@ -34,10 +44,10 @@ const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, []);
 
-  // Poll for SOS updates (Simulating real-time listener like Firebase Cloud Messaging)
+  // Poll for SOS updates
   useEffect(() => {
     const checkStatus = () => {
-      if (!user) return;
+      if (!user || currentScreen === 'TRACKING_LINK') return;
       const emergency = firebaseService.getActiveEmergency(user.userId);
       if (emergency && currentScreen !== 'EMERGENCY') {
         setActiveEmergency(emergency);
@@ -97,6 +107,10 @@ const App: React.FC = () => {
         <AuthScreen onLogin={handleLogin} />
       )}
       
+      {currentScreen === 'TRACKING_LINK' && trackId && (
+        <TrackingScreen emergencyId={trackId} />
+      )}
+
       {currentScreen === 'HOME' && user && (
         <HomeScreen 
           user={user} 

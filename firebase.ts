@@ -1,4 +1,3 @@
-
 import { UserProfile, Contact, EmergencyRecord, LocationUpdate, EmergencyStatus } from './types';
 
 const STORAGE_KEY = 'SAFE_VOICE_DB';
@@ -14,7 +13,6 @@ const saveDB = (db: any) => {
 };
 
 export const firebaseService = {
-  // AUTHENTICATION
   getCurrentUser: (): UserProfile | null => {
     const userJson = localStorage.getItem('SAFE_VOICE_SESSION');
     return userJson ? JSON.parse(userJson) : null;
@@ -55,7 +53,6 @@ export const firebaseService = {
     }
   },
 
-  // CONTACTS & MONITORING
   getContacts: (userId: string): Contact[] => {
     return getDB().contacts.filter((c: Contact) => c.userId === userId);
   },
@@ -72,51 +69,33 @@ export const firebaseService = {
     saveDB(db);
   },
 
-  // EMERGENCY CORE
   triggerEmergency: (userId: string): string => {
     const db = getDB();
-    const existing = db.emergencies.find((e: any) => e.userId === userId && e.status === EmergencyStatus.ACTIVE);
-    if (existing) return existing.emergencyId;
-
     const emergencyId = 'e_' + Date.now();
     const record: EmergencyRecord = { emergencyId, userId, status: EmergencyStatus.ACTIVE, triggeredAt: Date.now() };
     db.emergencies.push(record);
     saveDB(db);
     
-    // Initiate Real-World Alerts
     const user = Object.values(db.users).find((u: any) => u.userId === userId) as UserProfile;
     const contacts = db.contacts.filter((c: Contact) => c.userId === userId);
-    
-    // Get last known location for the initial alert
     const lastLoc = db.locations.filter((l: any) => l.emergencyId === emergencyId).pop() || { latitude: 0, longitude: 0 };
 
-    // Fix: replaced 'this.broadcastAlerts' with 'firebaseService.broadcastAlerts' as 'this' is undefined in arrow functions.
-    // Also added a check to ensure 'user' exists before accessing properties.
     if (user) {
       firebaseService.broadcastAlerts(user.name, emergencyId, lastLoc, contacts);
     }
 
-    console.log(`%c[FCM BROADCAST] High Priority SOS Sent for ${userId}`, 'background: #D32F2F; color: white; padding: 5px;');
     return emergencyId;
   },
 
-  // NEW: Dispatcher for backend alerts
   broadcastAlerts: async (userName: string, emergencyId: string, location: any, contacts: Contact[]) => {
     try {
-      const response = await fetch('/api/send-alert', {
+      await fetch('/api/alert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userName,
-          emergencyId,
-          location,
-          contacts: contacts.map(c => ({ name: c.name, phone: c.phone }))
-        })
+        body: JSON.stringify({ userName, emergencyId, location, contacts })
       });
-      const data = await response.json();
-      console.log("[Backend Alert System]:", data.message);
     } catch (err) {
-      console.error("[Backend Alert System] Critical Failure:", err);
+      console.error("[Twilio Dispatch] Failed:", err);
     }
   },
 

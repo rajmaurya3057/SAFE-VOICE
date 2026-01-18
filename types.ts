@@ -1,4 +1,3 @@
-
 export interface UserProfile {
   userId: string;
   name: string;
@@ -38,4 +37,4 @@ export interface LocationUpdate {
   timestamp: number;
 }
 
-export type AppState = 'SPLASH' | 'AUTH' | 'HOME' | 'EMERGENCY' | 'SETTINGS' | 'TRUSTED_VIEW';
+export type AppState = 'SPLASH' | 'AUTH' | 'HOME' | 'EMERGENCY' | 'SETTINGS' | 'TRUSTED_VIEW' | 'TRACKING_LINK';
