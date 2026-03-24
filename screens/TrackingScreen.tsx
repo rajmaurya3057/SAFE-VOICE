@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { EmergencyRecord, LocationUpdate, UserProfile, EmergencyStatus } from '../types';
 import { firebaseService } from '../firebase';
-
-declare const google: any;
+import L from 'leaflet';
 
 interface TrackingScreenProps {
   emergencyId: string;
@@ -13,10 +12,11 @@ const TrackingScreen: React.FC<TrackingScreenProps> = ({ emergencyId }) => {
   const [victim, setVictim] = useState<UserProfile | null>(null);
   const [locations, setLocations] = useState<LocationUpdate[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [mapError, setMapError] = useState(false);
   
-  const mapRef = useRef<any>(null);
-  const markerRef = useRef<any>(null);
-  const pathRef = useRef<any>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const markerRef = useRef<L.Marker | null>(null);
+  const pathRef = useRef<L.Polyline | null>(null);
 
   const fetchData = useCallback(() => {
     const records = JSON.parse(localStorage.getItem('SAFE_VOICE_DB') || '{}');
@@ -39,67 +39,61 @@ const TrackingScreen: React.FC<TrackingScreenProps> = ({ emergencyId }) => {
   const updateMapElements = (locs: LocationUpdate[]) => {
     if (!mapRef.current) return;
     const latest = locs[locs.length - 1];
-    const latLng = { lat: latest.latitude, lng: latest.longitude };
+    const latLng: L.LatLngExpression = [latest.latitude, latest.longitude];
     
     // Smoothly pan to latest location
     mapRef.current.panTo(latLng);
 
     // Update or create marker
     if (!markerRef.current) {
-      markerRef.current = new google.maps.Marker({
-        position: latLng,
-        map: mapRef.current,
-        optimized: true,
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 12,
-          fillColor: "#D32F2F",
-          fillOpacity: 1,
-          strokeColor: "#FFFFFF",
-          strokeWeight: 2,
-        }
+      const customIcon = L.divIcon({
+        className: 'custom-div-icon',
+        html: `<div style="background-color: #D32F2F; width: 24px; height: 24px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.5);"></div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
       });
+
+      markerRef.current = L.marker(latLng, { icon: customIcon }).addTo(mapRef.current);
     } else {
-      markerRef.current.setPosition(latLng);
+      markerRef.current.setLatLng(latLng);
     }
 
     // Update Breadcrumb Path
     if (pathRef.current) {
-      pathRef.current.setPath(locs.map(l => ({ lat: l.latitude, lng: l.longitude })));
+      pathRef.current.setLatLngs(locs.map(l => [l.latitude, l.longitude] as L.LatLngExpression));
     }
   };
 
   useEffect(() => {
-    const initMap = async () => {
-      if (typeof google === 'undefined' || !google.maps || !google.maps.importLibrary) {
-        setTimeout(initMap, 500);
-        return;
-      }
+    const initMap = () => {
+      const mapElement = document.getElementById("leaflet-tracking-map");
+      if (!mapElement || mapRef.current) return;
 
       try {
-        const { Map } = await google.maps.importLibrary("maps");
-        mapRef.current = new Map(document.getElementById("tracking-map")!, {
+        mapRef.current = L.map(mapElement, {
           zoom: 17,
-          disableDefaultUI: true,
-          gestureHandling: "greedy",
-          styles: [
-            { elementType: "geometry", stylers: [{ color: "#090B0E" }] },
-            { elementType: "labels.text.fill", stylers: [{ color: "#505050" }] },
-            { featureType: "water", elementType: "geometry", stylers: [{ color: "#000000" }] }
-          ]
+          zoomControl: false,
+          attributionControl: true,
+          center: [0, 0]
         });
 
-        pathRef.current = new google.maps.Polyline({
-          strokeColor: "#D32F2F",
-          strokeOpacity: 0.6,
-          strokeWeight: 3,
-          map: mapRef.current
-        });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; OpenStreetMap'
+        }).addTo(mapRef.current);
+
+        pathRef.current = L.polyline([], {
+          color: "#D32F2F",
+          weight: 3,
+          opacity: 0.6
+        }).addTo(mapRef.current);
 
         setIsLoaded(true);
+        setMapError(false);
         fetchData();
       } catch (err) {
-        console.error("Map initialization failed:", err);
+        console.error("Leaflet initialization failed:", err);
+        setMapError(true);
       }
     };
 
@@ -112,6 +106,10 @@ const TrackingScreen: React.FC<TrackingScreenProps> = ({ emergencyId }) => {
     return () => {
       window.removeEventListener('storage_update', fetchData);
       window.removeEventListener('storage', fetchData);
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
     };
   }, [fetchData]);
 
@@ -128,7 +126,14 @@ const TrackingScreen: React.FC<TrackingScreenProps> = ({ emergencyId }) => {
   return (
     <div className="relative h-full w-full bg-black overflow-hidden font-sans">
       {/* Real-time Map Canvas */}
-      <div id="tracking-map" className="absolute inset-0 z-0 opacity-60"></div>
+      <div id="leaflet-tracking-map" className="absolute inset-0 z-0">
+        {mapError && (
+          <div className="h-full w-full flex flex-col items-center justify-center bg-[#090b0e] p-8 text-center">
+             <i className="fa-solid fa-map-location-dot text-gray-800 text-6xl mb-6"></i>
+             <p className="text-gray-500 font-black uppercase text-[10px] tracking-widest leading-relaxed">Map Feed Interrupted</p>
+          </div>
+        )}
+      </div>
       
       {/* Scanning HUD Effect */}
       <div className="absolute inset-0 z-5 pointer-events-none opacity-10 bg-[radial-gradient(circle_at_center,_transparent_0%,_black_100%)]"></div>

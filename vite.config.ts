@@ -6,11 +6,8 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      'process.env.API_KEY': JSON.stringify(env.API_KEY || 'AIzaSyBvRUqiG8f2jXrPVbxuSMY9vu3ZiJ-bszc'),
-      'process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY': JSON.stringify(env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || env.API_KEY || 'AIzaSyBvRUqiG8f2jXrPVbxuSMY9vu3ZiJ-bszc'),
-      'process.env.TWILIO_ACCOUNT_SID': JSON.stringify(env.TWILIO_ACCOUNT_SID),
-      'process.env.TWILIO_AUTH_TOKEN': JSON.stringify(env.TWILIO_AUTH_TOKEN),
-      'process.env.TWILIO_SMS_FROM': JSON.stringify(env.TWILIO_SMS_FROM),
+      'process.env.API_KEY': JSON.stringify(env.API_KEY),
+      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.API_KEY),
       'process.env.APP_URL': JSON.stringify(env.APP_URL)
     },
     server: {

@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, EmergencyRecord, LocationUpdate } from '../types';
 import { firebaseService } from '../firebase';
 import { GoogleGenAI } from "@google/genai";
-
-declare const google: any;
+import L from 'leaflet';
 
 interface EmergencyScreenProps {
   user: UserProfile;
@@ -17,9 +16,9 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
   const [mapError, setMapError] = useState<boolean>(false);
   const [dispatchStatus, setDispatchStatus] = useState<{sent: number, total: number} | null>(null);
   
-  const mapRef = useRef<any>(null);
-  const markerRef = useRef<any>(null);
-  const pathRef = useRef<any>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const markerRef = useRef<L.Marker | null>(null);
+  const pathRef = useRef<L.Polyline | null>(null);
   const watchIdRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -34,32 +33,32 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
   }, []);
 
   useEffect(() => {
-    const initMap = async () => {
-      if (typeof google === 'undefined' || !google.maps || !google.maps.importLibrary) {
-        setMapError(true);
-        return;
-      }
+    const initMap = () => {
+      const mapElement = document.getElementById("leaflet-map");
+      if (!mapElement || mapRef.current) return;
 
       try {
-        const { Map } = await google.maps.importLibrary("maps");
-        mapRef.current = new Map(document.getElementById("google-map"), {
-          center: { lat: 0, lng: 0 },
-          zoom: 18,
-          disableDefaultUI: true,
-          styles: [
-            { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
-            { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
-            { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
-          ]
+        mapRef.current = L.map(mapElement, {
+          zoomControl: false,
+          attributionControl: true,
+          center: [0, 0],
+          zoom: 18
         });
 
-        pathRef.current = new google.maps.Polyline({
-          strokeColor: "#D32F2F",
-          strokeOpacity: 0.8,
-          strokeWeight: 4,
-          map: mapRef.current
-        });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; OpenStreetMap'
+        }).addTo(mapRef.current);
+
+        pathRef.current = L.polyline([], {
+          color: "#D32F2F",
+          weight: 4,
+          opacity: 0.8
+        }).addTo(mapRef.current);
+        
+        setMapError(false);
       } catch (err) {
+        console.error("Leaflet initialization failed:", err);
         setMapError(true);
       }
     };
@@ -81,29 +80,24 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
           setLastUpdate(Date.now());
           
           if (mapRef.current) {
-            const latLng = { lat: latitude, lng: longitude };
-            mapRef.current.setCenter(latLng);
+            const latLng: L.LatLngExpression = [latitude, longitude];
+            mapRef.current.setView(latLng, mapRef.current.getZoom());
             
             if (!markerRef.current) {
-              markerRef.current = new google.maps.Marker({
-                position: latLng,
-                map: mapRef.current,
-                icon: {
-                  path: google.maps.SymbolPath.CIRCLE,
-                  scale: 10,
-                  fillColor: "#D32F2F",
-                  fillOpacity: 1,
-                  strokeColor: "#FFFFFF",
-                  strokeWeight: 2,
-                }
+              const customIcon = L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div style="background-color: #D32F2F; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.5);"></div>`,
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
               });
+
+              markerRef.current = L.marker(latLng, { icon: customIcon }).addTo(mapRef.current);
             } else {
-              markerRef.current.setPosition(latLng);
+              markerRef.current.setLatLng(latLng);
             }
 
             if (pathRef.current) {
-              const path = pathRef.current.getPath();
-              path.push(new google.maps.LatLng(latitude, longitude));
+              pathRef.current.addLatLng(latLng);
             }
           }
         },
@@ -114,14 +108,19 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
 
     return () => {
       if (watchIdRef.current) navigator.geolocation.clearWatch(watchIdRef.current);
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
     };
   }, [emergency.emergencyId]);
 
   useEffect(() => {
     const fetchAiAdvice = async () => {
-      if (!process.env.API_KEY) return;
+      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+      if (!apiKey) return;
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const ai = new GoogleGenAI({ apiKey });
         const response = await ai.models.generateContent({
           model: 'gemini-3-flash-preview',
           contents: "Provide a very short tactical safety tip (10 words max) for someone in immediate danger. For example: 'Stay in lit areas' or 'Find a safe exit'."
@@ -138,7 +137,7 @@ const EmergencyScreen: React.FC<EmergencyScreenProps> = ({ user, emergency, onRe
 
   return (
     <div className="relative h-full w-full bg-black overflow-hidden">
-      <div id="google-map" className="absolute inset-0 z-0 opacity-70">
+      <div id="leaflet-map" className="absolute inset-0 z-0">
         {mapError && (
           <div className="h-full w-full flex flex-col items-center justify-center bg-[#090b0e] p-8 text-center">
              <i className="fa-solid fa-map-location-dot text-gray-800 text-6xl mb-6"></i>
